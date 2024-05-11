@@ -1,178 +1,163 @@
-from file import File
-from tag import Tag
-from pics import Pic
+import os
 from customtkinter import *
 import tkinter as tk
-from tkinter import messagebox, filedialog
-from PIL import Image, ImageTk
-import math
+from user import User
+from file import File
+from tag import Tag
+import pyautogui
 
 
 class Jamplorer:
     def __init__(self):
-        self.files = set()
-        self.tags = set()
-        self.root = tk.Tk()
-        self.root.title("Jamplorer")
-        self.width = 800
-        self.height = 600
-        self.root.geometry(f"{self.width}x{self.height}")
-        self.paned_window = None
-        self.file_list_frame = None
-        self.file_viewer = None
-        self.start_x = self.width * 0.66
-        self.load_files()
-        self.load_tags()
-        self.create_window()
-        self.search_var = ""
-        self.search_entry = None
+        self.active_user, self.users = self.get_users("user.dat")
+        self.screen_width, self.screen_height = pyautogui.size()
+        self.files = self.get_users_files()
+        self.visible_files = set([self.files[file] for file in self.files])
+        self.tags = self.get_users_tags()
+        self.opened_file = None
 
-    def add_tag(self, name, sub_tags):
-        self.tags.add(Tag(name, sub_tags, len(self.tags)))
+        self.width = 1024
+        self.height = 512
 
-        lines = [f"{t.name}-->{','.join(t.sub_tags)}" for t in self.tags]
-        with open("tags.dat", "w") as file:
-            file.write("\n".join(lines))
+        self.app = CTk()
+        self.app.geometry(f"{self.width}x{self.height}")
+        set_appearance_mode("dark")
+        self.app.title("Jamplorer")
 
-    def remove_tag(self, name):
-        for tag in self.tags:
-            if tag.name == name:
-                confirm = messagebox.askyesno("Confirmation", f"Are you sure you want to delete the tag '{name}'?")
-                if confirm:
-                    tag.remove_tag()
-                    self.tags.remove(tag)
+        self.top_bar = None
+        self.tag_bar = None
+        self.search_bar = None
 
-                    lines = [f"{t.name}-->{','.join(t.sub_tags)}" for t in self.tags]
-                    with open("tags.dat", "w") as file:
-                        file.write("\n".join(lines))
-                    print(f"Tag '{name}' deleted successfully.")
+        self.create_top_bar(self.app)
+        self.create_tag_bar(self.app)
+        self.show_files(self.app)
 
-                    break
+        self.app.mainloop()
 
     def handle_search(self, *args):
-        search_query = self.search_var.get()
-        displayable_files = []
+        search_str = self.search_bar.get()
 
-        if len(search_query) != 0:
-            for f, file_name in enumerate([file.filename for file in self.files]):
-                for i in range(math.ceil(len(file_name) / len(search_query))):
-                    if file_name[i: i + len(search_query)] == search_query:
-                        displayable_files.append(self.files[f])
+        if search_str == "":
+            self.visible_files = set([self.files[file] for file in self.files])
         else:
-            displayable_files = self.files
+            self.visible_files = set()
+            for file in self.files:
+                for i in range(len(file) // len(search_str)):
+                    if file[i:i + len(search_str)] == search_str:
+                        self.visible_files.add(self.files[file])
 
-        self.display_files(displayable_files)
+        self.show_files(self.app)
 
-    def create_window(self):
-        # Create a PanedWindow to hold left and right panes
-        self.paned_window = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, sashwidth=5, sashpad=5, sashrelief=tk.RAISED)
-        self.paned_window.pack(fill=tk.BOTH, expand=True)
-
-        self.create_left_pane()
-        self.create_right_pane()
-
-        # Create a separator (sash) between the panes
-        self.paned_window.sash_place(0, 400, 1)  # Set initial position of the sash (splitter)
-
-        # Bind mouse events to allow resizing with the sash
-        self.paned_window.bind("<Button-1>", self.start_resize)
-        self.paned_window.bind("<B1-Motion>", self.resize)
-
-        # Start the main event loop
-        self.root.mainloop()
-
-    def create_left_pane(self):
-        # Left pane (file list)
-        self.file_list_frame = tk.Frame(self.paned_window, bg="gray")
-        self.file_list_frame.pack(fill=tk.BOTH, expand=True)
-        self.paned_window.add(self.file_list_frame)
-
-        # Searchbar
-        self.create_search_bar()
-
-        # Import button
-        import_button = tk.Button(self.file_list_frame, text="Import new Content", command=self.import_file)
-        import_button.pack(pady=5)
-
-    def create_right_pane(self):
-        self.file_viewer = tk.Frame(self.paned_window, bg="lightgray")
-        self.file_viewer.pack(fill=tk.BOTH, expand=True)
-        self.paned_window.add(self.file_viewer)
-
-    def create_search_bar(self):
-        # Create a search bar (entry widget)
-        self.search_var = tk.StringVar()
-        self.search_entry = tk.Entry(self.file_list_frame, textvariable=self.search_var)
-        self.search_entry.pack(pady=10, padx=10, fill=tk.X)
-
-        # Bind a callback function to handle search events (e.g., typing in the search bar)
-        self.search_var.trace_add("write", self.handle_search)
-        self.display_files(self.files)
-
-    def display_files(self, searched_files):
-        # Delete displayed file list
-        for widget in self.file_list_frame.winfo_children():
-            if isinstance(widget, tk.Button):
+    def show_files(self, app):
+        # Destroy previous files_panel if it exists
+        for widget in app.winfo_children():
+            if isinstance(widget, CTkFrame) and widget.winfo_name() == "!ctkframe3":
+                for button in widget.winfo_children():
+                    button.destroy()
                 widget.destroy()
 
-        # Display file list
-        for file in searched_files:
-            file_button = tk.Button(self.file_list_frame, text=file.get_filename(),
-                                    command=lambda f=file: self.display_file_details(f))
-            file_button.pack(pady=5)
+        # Create a new files_panel based on the state of opened_file
+        if self.opened_file is None:
+            # Full-width files_panel when no file is opened
+            files_panel = CTkFrame(master=app, fg_color="#000000", corner_radius=0,
+                                   width=self.screen_width, height=self.screen_height - 150)
+            files_panel.place(relx=0.5, y=150, anchor="n")
 
-    def display_file_details(self, file):
-        for widget in self.file_viewer.winfo_children():
-            widget.destroy()
+            # Create buttons for visible_files within files_panel
+            for i, element in enumerate(self.visible_files):
+                el_button = CTkButton(master=files_panel, width=self.width - 60, height=30, corner_radius=40,
+                                      text=element.get_filename(), command=lambda el=element: self.view_details(el),
+                                      text_color="#00FF19", bg_color="transparent", fg_color="transparent",
+                                      hover_color="#1F1F1F")
+                el_button.place(relx=0.5, y=30 + (i * 35), anchor="center")
+        else:
+            # Half-width files_panel when a file is opened
+            files_panel = CTkFrame(master=app, fg_color="#000000", corner_radius=0,
+                                   width=self.screen_width // 2, height=self.screen_height - 150)
+            files_panel.place(relx=0.5, y=150, anchor="ne")
 
-        file.display_filename(self.file_viewer)
+            # Create buttons for visible_files within files_panel
+            for i, element in enumerate(self.visible_files):
+                el_button = CTkButton(master=files_panel, width=(self.width // 2) - 60, height=30, corner_radius=40,
+                                      text=element.get_filename(), command=lambda el=element: self.view_details(el),
+                                      text_color="#00FF19", bg_color="transparent", fg_color="transparent",
+                                      hover_color="#1F1F1F")
+                el_button.place(relx=0.5, x=-15, y=30 + (i * 35), anchor="w")
 
-        if isinstance(file, Pic):
-            file.display_pic_info(self.file_viewer.winfo_width() - 20, self.file_viewer.winfo_height() - 100, self.file_viewer)
+    def view_details(self, element):
+        self.opened_file = element
+        self.show_files(self.app)
+        print("Viewing:", element.get_filename())
 
-        file.display_options(self.file_viewer)
+    def create_top_bar(self, app):
+        self.top_bar = CTkFrame(master=app, fg_color="#1F1F1F", corner_radius=0, width=self.screen_width, height=50,
+                                bg_color="transparent", border_color="#1F1F1F")
+        self.top_bar.place(relx=0.5, y=0, anchor="n")
 
-    def import_file(self):
-        # Let the user decide which file or files to import into the system
-        file_paths = filedialog.askopenfilenames(
-            initialdir="/",  # Initial directory (optional)
-            title="Select File(s) to Import",
-            filetypes=(("All Files", "*.*"), ("PNG Files", "*.png"), ("JPEG Files", "*.jpg"))
-        )
+        self.create_search_bar(self.top_bar)
+        self.create_accounts(self.top_bar)
 
-        if file_paths:
-            for file_path in file_paths:
-                if file_path.endswith((".png", ".jpg", ".jpeg")):
-                    self.files.add(Pic(file_path, tags=[], i=len(self.files)))
-                else:
-                    self.files.add(File(file_path, tags=[], i=len(self.files)))
-            self.add_file()
-            self.display_files(self.files)
+    def create_tag_bar(self, app):
+        self.tag_bar = CTkFrame(master=app, fg_color="#080808", corner_radius=0, width=self.screen_width, height=100,
+                                bg_color="transparent", border_color="#080808")
+        self.tag_bar.place(relx=0.5, y=50, anchor="n")
 
-    def add_file(self):
-        lines = [f"{f.filename}-->{','.join(f.tags)}" for f in self.files]
-        with open("tags.dat", "w") as file:
-            file.write("\n".join(lines))
+    def create_accounts(self, app):
+        github_bubble = CTkButton(master=app, width=0, text="G", corner_radius=40, text_color="#00FF19",
+                                  fg_color="#181818", border_color="#1F1F1F", hover_color="#282828")
+        deepl_bubble = CTkButton(master=app, width=0, text="D", corner_radius=40, text_color="#00FF19",
+                                 fg_color="#181818", border_color="#1F1F1F", hover_color="#282828")
+        account_bubble = CTkButton(master=app, width=0, text="A", corner_radius=40, text_color="#00FF19",
+                                   fg_color="#181818", border_color="#1F1F1F", hover_color="#282828")
 
-    def start_resize(self, event):
-        self.start_x = event.x
+        github_bubble.place(relx=0.5, x=30, rely=0.5, anchor="w")
+        deepl_bubble.place(relx=0.5, x=80, rely=0.5, anchor="w")
+        account_bubble.place(relx=0.5, x=130, rely=0.5, anchor="w")
 
-    def resize(self, event):
-        delta_x = event.x - self.start_x
-        self.paned_window.sash_place(0, int(self.paned_window.sash_coord(0)[0] + delta_x), 1)
-        self.start_x = event.x
+    def create_search_bar(self, app):
+        self.search_bar = CTkEntry(master=app, corner_radius=40, fg_color="#181818", border_color="#1F1F1F",
+                                   width=self.width // 2 - 20, text_color="#00FF19")
+        self.search_bar.place(relx=0.5, rely=0.5, anchor="e")
+        self.search_bar.bind('<KeyRelease>', self.handle_search)
 
-    def load_tags(self):
-        for i, line in enumerate(open("tags.dat").read().strip().split("\n")):
-            tag_name, sub_tags = line.split("-->")
-            sub_tags = sub_tags.split(",")
-            self.tags.add(Tag(tag_name, sub_tags, i))
+    @staticmethod
+    def get_users(users_path):
+        active_user = open(users_path).read().strip().split("\n")[0]
+        users = {}
 
-    def load_files(self):
-        for i, line in enumerate(open("files.dat").read().strip().split("\n")):
-            file_path, tags = line.split("-->")
-            tags = tags.split(",")
-            if file_path.split(".")[-1].lower() in ["png", "jpg", "jpeg"]:
-                self.files.add(Pic(file_path, tags, i))
-            else:
-                self.files.add(File(file_path, tags, i))
+        for user in open(users_path).read().strip().split("\n")[1:]:
+            user_data = user.split(">")
+            users[user_data[0]] = User(user_data[0], user_data[1], user_data[2], user_data[3],
+                                       user_data[4], user_data[5], user_data[6])
+
+        return active_user, users
+
+    def get_users_files(self):
+        files_path = self.users[self.active_user].get_files_path()
+        files = {}
+
+        with open(files_path) as file_data:
+            for line in file_data:
+                line = line.strip()
+                if line:
+                    file_info, extra_info = line.split("?")
+                    file_path, tag_data = file_info.split("-->")
+                    tags = tag_data.split(",")
+                    file_name = os.path.basename(file_path).split(".")[0]
+                    files[file_name] = File(file_path, tags, extra_info)
+
+        return files
+
+    def get_users_tags(self):
+        tags_path = self.users[self.active_user].get_tags_path()
+        tags = {}
+
+        with open(tags_path) as tag_data:
+            for line in tag_data:
+                line = line.strip()
+                if line:
+                    tag_path, tag_data = line.split("-->")
+                    tags_name = os.path.basename(tag_path).split(".")[0]
+                    tags[tags_name] = Tag(tag_path, tag_data.split(","))
+
+        return tags

@@ -1,9 +1,8 @@
 
 class Tag:
-    def __init__(self, name, tags, i):
+    def __init__(self, name, tags):
         self.name = name
         self.sub_tags = tags
-        self.index = i
 
         print(f"Saved/Restored the tag {self.name} with the sub_tags {', '.join(map(str, self.sub_tags))}.")
 
